@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: wolt_raw
+    database: wolt-dbt-project
+    schema: wolt_store_snack_raw
+    description: >
+      Landing layer containing the original Wolt Snack Store files ingested from
+      Cloud Storage. These tables are stored as raw text and are not intended for
+      direct analysis.
+
+    tables:
+      - name: item_logs_raw
+        description: >
+          System change log for snack items. Each row represents a modification
+          to an item at a specific timestamp and contains a JSON payload with
+          product attributes such as name, category, and pricing.
+
+      - name: purchase_logs_raw
+        description: >
+          Order-level records for all completed and delivered purchases in 2023.
+          Each row represents one purchase and includes delivery details, fees,
+          basket value, and an array describing the items bought.
+
+      - name: promos_raw
+        description: >
+          Records of item-level promotions, including start and end dates,
+          promotion type, and percentage discount applied to the base price.

@@ -1,0 +1,404 @@
+version: 2
+
+models:
+  - name: dim_customer
+    description: >
+      One row per customer summarizing their lifetime purchasing behavior.
+      This dimension is derived from purchase logs and is intended to support
+      retention, cohort, and engagement analysis.
+
+    columns:
+      - name: customer_key
+        description: >
+          Unique identifier for a customer in the Wolt Snacks system.
+          This serves as the primary key of the customer dimension.
+        tests:
+          - unique
+          - not_null
+
+      - name: first_purchase_date
+        description: >
+          Timestamp of the customer's earliest recorded purchase.
+          Used to determine customer tenure.
+        tests:
+          - not_null
+
+      - name: last_purchase_date
+        description: >
+          Timestamp of the customer's most recent purchase.
+          Used as a proxy for recency in retention analysis.
+        tests:
+          - not_null
+
+      - name: total_purchases
+        description: >
+          Total number of completed purchases made by the customer.
+          This metric reflects overall purchases made within the app store.
+        tests:
+          - not_null
+
+      - name: is_returning_customer
+        description: >
+          Boolean flag indicating whether the customer has placed more than one order.
+          True means the customer has returned at least once after their first purchase.
+        tests:
+          - not_null
+
+  - name: dim_item_history
+    description: >
+      Slowly changing history of item attributes and prices over time.
+      Each row represents one valid version of an item at a specific point in time.
+      This model allows analysts to track price evolution, corrections,
+      and adjustments across the lifecycle of each product.
+
+    columns:
+      - name: item_history_key
+        description: >
+          Surrogate key for the item history table, combining item_key,
+          timestamp, and price signal to ensure uniqueness across versions.
+        tests:
+          - unique
+          - not_null
+
+      - name: log_item_id
+        description: >
+          Original event identifier from the source item logs.
+          Kept for lineage, debugging, and traceability to the raw data.
+        tests:
+          - not_null
+
+      - name: item_key
+        description: >
+          Stable business key identifying a unique product in the Wolt catalog.
+        tests:
+          - not_null
+
+      - name: brand_name
+        description: >
+          Brand of the item as provided in the source payload.
+        tests:
+          - not_null
+
+      - name: category
+        description: >
+          High-level product category (e.g., Chocolate, Crisps, Dips).
+        tests:
+          - not_null
+
+      - name: item_name_en
+        description: >
+          English product name extracted from the nested JSON array.
+        tests:
+          - not_null
+
+      - name: price_including_vat
+        description: >
+          Base product price including VAT. Can be positive, negative,
+          or missing depending on source behavior.
+
+      - name: vat_percentage
+        description: >
+          VAT rate applied to the product price.
+        tests:
+          - not_null
+
+      - name: valid_from_utc
+        description: >
+          Timestamp when this price version became valid in the source system.
+        tests:
+          - not_null
+
+      - name: valid_to_utc
+        description: >
+          Timestamp when this price version stopped being valid.
+          NULL indicates the currently active price.
+
+      - name: time_item_created_in_source_utc
+        description: >
+          When the item was originally created in the source system.
+
+      - name: weight_in_grams
+        description: >
+          Product weight in grams as provided in the source payload.
+
+      - name: price_type
+        description: >
+          Derived classification of price as 'positive', 'negative',
+          'missing', or 'zero' to support easier analysis of adjustments
+          and data quality issues.
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - positive
+                - negative
+                - missing
+                - zero
+
+  - name: dim_item
+    description: >
+      One-row-per-item snapshot of the current product catalog.
+      This model sits on top of dim_item_history and provides a clean,
+      analyst-friendly view of each product with sensible attributes
+      and a realistic “current” price.
+
+      Attributes are taken from the latest observed item log, while price
+      is taken from the most recent *positive* price in the item's history.
+      This avoids surfacing negative or missing prices as the current price.
+
+      This table is designed for simple reporting, catalog analysis,
+      and downstream joins to fact tables.
+
+    columns:
+      - name: item_key
+        description: >
+          Stable business key identifying a unique product in Wolt Snacks.
+          This is the primary key of the dimension and matches dim_item_history.
+        tests:
+          - not_null
+          - unique
+
+      - name: brand_name
+        description: >
+          Brand of the product, taken from the most recent item log.
+        tests:
+          - not_null
+
+      - name: category
+        description: >
+          High-level product category from the latest item log.
+        tests:
+          - not_null
+
+      - name: item_name_en
+        description: >
+          English product name extracted from the JSON payload.
+          Sourced from the most recent item log.
+        tests:
+          - not_null
+
+      - name: weight_in_grams
+        description: >
+          Product weight in grams from the latest observed log event.
+        tests:
+          - not_null
+
+      - name: current_price_including_vat
+        description: >
+          Most recent positive price observed for this item in dim_item_history.
+          If no positive price ever existed, this is set to 0 and flagged below.
+        tests:
+          - not_null
+
+      - name: has_no_positive_price
+        description: >
+          TRUE when the item has never had a positive price in history.
+          This is a data-quality signal rather than a business rule.
+        tests:
+          - not_null
+
+      - name: price_effective_from_utc
+        description: >
+          Timestamp when the current positive price first appeared in history.
+          Useful for tracking how fresh the price is.
+        tests:
+          - not_null
+
+      - name: last_seen_in_logs_utc
+        description: >
+          Timestamp of the most recent item log for this product.
+          Indicates how recently the item was updated in source.
+        tests:
+          - not_null
+
+  - name: dim_promo
+    description: >
+      A time-aware dimension capturing item-level promotions with clear
+      validity windows. Each row represents one promotion period for one item.
+
+    columns:
+      - name: promo_key
+        description: Surrogate key combining item_key and promotion window
+        tests:
+          - not_null
+          - unique
+
+      - name: item_key
+        description: Foreign key to dim_item
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_item')
+              field: item_key
+
+      - name: promo_type
+        description: Type of promotion
+        tests:
+          - not_null
+
+      - name: discount_in_percentage
+        description: Discount percentage applied to the item
+        tests:
+          - not_null
+
+      - name: promo_start_utc
+        description: Timestamp when promotion becomes active (midnight UTC)
+        tests:
+          - not_null
+
+      - name: promo_end_utc
+        description: Timestamp when promotion stops being valid (midnight UTC, exclusive)
+        tests:
+          - not_null
+
+      - name: is_current_promo
+        description: Indicates whether the promotion is currently active
+        tests:
+          - not_null
+
+      - name: promo_length_days
+        description: Duration of the promotion in days
+        tests:
+          - not_null
+
+
+  - name: fct_purchases
+    description: >
+      Order-level fact table containing one row per completed and delivered
+      purchase in the Wolt Snack Store. This table centralizes all financial,
+      operational, and promotional metrics at the purchase grain.
+
+    columns:
+
+      - name: purchase_key
+        description: Primary key identifying a completed purchase
+        tests:
+          - not_null
+          - unique
+
+      - name: time_order_received_utc
+        description: Timestamp when the order was received (UTC)
+        tests:
+          - not_null
+
+      - name: time_order_received_date
+        description: Order date derived from the received timestamp
+        tests:
+          - not_null
+
+      - name: customer_key
+        description: Foreign key to dim_customer
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+
+      - name: is_returning_customer
+        description: >
+          Indicates whether the customer is a returning customer.
+          Denormalized from dim_customer for analytical convenience.
+        tests:
+          - not_null
+
+      - name: delivery_distance_meters
+        description: Distance between store and delivery location in meters
+        tests:
+          - not_null
+
+      - name: wolt_service_fee
+        description: Service fee charged by Wolt for the order
+        tests:
+          - not_null
+
+      - name: courier_base_fee
+        description: Base fee paid to the courier for the delivery
+        tests:
+          - not_null
+
+      - name: total_basket_value
+        description: Total value paid for items in the basket, excluding service and courier fees
+        tests:
+          - not_null
+
+      - name: total_items_in_basket
+        description: Total quantity of items purchased in the order
+        tests:
+          - not_null
+
+      - name: items_in_basket
+        description: Comma-separated list of item_keys included in the order
+        tests:
+          - not_null
+
+      - name: is_promo_order
+        description: >
+          Indicates whether at least one item in the basket was under an active
+          promotion at the time of purchase
+        tests:
+          - not_null
+
+  - name: fct_purchases_items
+    description: >
+      Item-level fact table representing one row per item per completed purchase.
+      This table captures what was purchased, in what quantity, at what price,
+      and whether the item was discounted at the time of purchase.
+
+      Prices in this table are validated against item history to ensure that only
+      positive, time-correct prices are included. Rows without a valid price at
+      purchase time are intentionally excluded to preserve metric integrity.
+
+    columns:
+      - name: purchase_item_key
+        description: >
+          Surrogate primary key combining purchase_key and item_key to ensure one row per item per purchase.
+        tests:
+          - not_null
+          - unique
+          
+      - name: time_order_received_utc
+        description: Timestamp when the order was received (UTC)
+        tests:
+          - not_null
+
+      - name: purchase_key
+        description: Foreign key referencing the parent purchase in fct_purchases.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('fct_purchases')
+              field: purchase_key
+
+      - name: item_key
+        description: Foreign key referencing the purchased item.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_item')
+              field: item_key
+
+      - name: quantity
+        description: Number of units of the item purchased in this order.
+        tests:
+          - not_null
+
+      - name: item_price_at_purchase
+        description: >
+          Validated item price (including VAT) effective at the time of purchase.
+          Only positive prices are allowed; negative or missing prices are excluded
+          during model construction.
+        tests:
+          - not_null
+
+      - name: was_on_promo
+        description: >
+          Indicates whether the item was under an active promotion at the time
+          of purchase, based on promo validity windows.
+        tests:
+          - not_null
+
+      - name: discount_in_percentage
+        description: >
+          Discount percentage applied to the item if it was on promotion.
+          Null if the item was not discounted.
+

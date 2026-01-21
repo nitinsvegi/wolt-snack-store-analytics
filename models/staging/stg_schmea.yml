@@ -1,0 +1,101 @@
+version: 2
+
+models:
+  - name: stg_item_logs
+    description: >
+      Clean technical version of the item change log.
+      This model preserves one row per system change event and keeps the JSON
+      payload intact for later parsing in dimensional models.
+
+    columns:
+      - name: log_item_id
+        description: Unique identifier of each item change event in the source system.
+        tests:
+          - not_null
+
+      - name: item_key
+        description: Stable business identifier for a product across all versions.
+        tests:
+          - not_null
+
+      - name: time_log_created_utc
+        description: Timestamp when the item record was modified in the source system.
+        tests:
+          - not_null
+
+      - name: payload_json
+        description: >
+          Raw JSON payload containing item attributes such as brand, category,
+          names in multiple languages, price attributes, and VAT information.
+          Parsed later in dim_item and dim_item_history.
+
+
+  - name: stg_promos
+    description: >
+      Clean technical view of item-level promotions and discounts.
+
+    columns:
+      - name: promo_start_date
+        description: First date when the promotion becomes active (inclusive).
+        tests:
+          - not_null
+
+      - name: promo_end_date
+        description: First date when the promotion is no longer valid (exclusive).
+        tests:
+          - not_null
+
+      - name: item_key
+        description: Product identifier to which the promotion applies.
+        tests:
+          - not_null
+
+      - name: promo_type
+        description: Business description of the promotion.
+
+      - name: discount_in_percentage
+        description: Percentage reduction applied to the item price.
+        tests:
+          - not_null
+
+
+  - name: stg_purchase_logs
+    description: >
+      Clean technical version of completed and delivered purchases in 2023.
+      One row per order with the item basket preserved as JSON text.
+
+    columns:
+      - name: time_order_received_utc
+        description: Timestamp when the order was received and paid by the customer.
+        tests:
+          - not_null
+
+      - name: purchase_key
+        description: Primary key of the purchase across Wolt systems.
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_key
+        description: Stable identifier of the customer account.
+        tests:
+          - not_null
+
+      - name: delivery_distance_line_meters
+        description: Straight-line distance from store to customer in meters.
+
+      - name: wolt_service_fee
+        description: Fee charged by Wolt for using the platform.
+
+      - name: courier_base_fee
+        description: Base delivery fee paid to the courier (excluding tips).
+
+      - name: total_basket_value
+        description: >
+          Total paid for items in the basket including discounts,
+          but excluding Wolt service fee and courier fee.
+
+      - name: item_basket_description
+        description: >
+          JSON array describing which items were purchased and in what quantities.
+          Expanded later in fct_purchase_items.
